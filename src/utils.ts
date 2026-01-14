@@ -90,8 +90,10 @@ export function rgbToColorTemperature(r: number, g: number, b: number): number {
   const temp = n > 0.5 ? 2000 + (1 - n) * 3000 : 2000 + n * 3000;
   // Convert to mireds (inverse of kelvin * 1,000,000)
   const mireds = Math.round(1000000 / temp);
-  // Clamp to valid HomeKit range (50-500 mireds)
-  return Math.max(50, Math.min(500, mireds));
+  // Clamp to valid HomeKit range (140-500 mireds)
+  // Note: This function may return values outside this range for non-white colors
+  // Callers should validate the result before using it
+  return Math.max(140, Math.min(500, mireds));
 }
 
 /**

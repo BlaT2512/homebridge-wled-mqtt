@@ -245,10 +245,10 @@ export class WLEDAccessory {
             this.platform.log.debug(`Adaptive Lighting disabled for ${this.device.name} due to color change from MQTT`);
           }
           
-          // Update color temperature to match the new color
-          const mireds = rgbToColorTemperature(rgb.r, rgb.g, rgb.b);
-          this.currentState.colorTemperature = mireds;
-          this.service.updateCharacteristic(this.platform.Characteristic.ColorTemperature, mireds);
+          // Don't update ColorTemperature when receiving color from MQTT
+          // Color temperature only applies to white/neutral colors, not arbitrary RGB colors
+          // The ColorTemperature characteristic will be updated when adaptive lighting is active
+          // or when the user manually adjusts color temperature
         }
       } else if (topic === `${baseTopic}/status`) {
         // Status (online/offline)
