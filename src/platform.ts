@@ -1,29 +1,38 @@
-import { API, DynamicPlatformPlugin, Logger, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
+import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
 
 import { WLEDAccessory } from './wledAccessory';
+import { PLATFORM_NAME, PLUGIN_NAME } from './settings';
 
 /**
  * HomebridgePlatform
- * This class is the main constructor for the plugin
+ * This class is the main constructor for your plugin, this is where you should
+ * parse the user config and discover/register accessories with Homebridge.
  */
 export class WLEDMQTTPlatform implements DynamicPlatformPlugin {
-  public readonly Service: typeof Service = this.api.hap.Service;
-  public readonly Characteristic = this.api.hap.Characteristic;
-  public readonly accessories: PlatformAccessory[] = [];
+  public readonly Service: typeof Service;
+  public readonly Characteristic: typeof Characteristic;
+
+  // this is used to track restored cached accessories
+  public readonly accessories: Map<string, PlatformAccessory> = new Map();
+  public readonly discoveredCacheUUIDs: string[] = [];
 
   constructor(
-    public readonly log: Logger,
+    public readonly log: Logging,
     public readonly config: PlatformConfig,
     public readonly api: API,
   ) {
+    this.Service = api.hap.Service;
+    this.Characteristic = api.hap.Characteristic;
+
     this.log.debug('Finished initializing platform:', this.config.name);
 
-    // When this event is fired, it means Homebridge has restored all cached accessories
-    // from disk. Dynamic Platform plugins should only register new accessories after this event was fired,
-    // in order to ensure they weren't added to homebridge already.
+    // When this event is fired it means Homebridge has restored all cached accessories from disk.
+    // Dynamic Platform plugins should only register new accessories after this event was fired,
+    // in order to ensure they weren't added to homebridge already. This event can also be used
+    // to start discovery of new accessories.
     this.api.on('didFinishLaunching', () => {
       log.debug('Executed didFinishLaunching callback');
-      // Run the method to discover / register devices as accessories
+      // run the method to discover / register your devices as accessories
       this.discoverDevices();
     });
   }
@@ -34,8 +43,9 @@ export class WLEDMQTTPlatform implements DynamicPlatformPlugin {
    */
   configureAccessory(accessory: PlatformAccessory) {
     this.log.info('Loading accessory from cache:', accessory.displayName);
-    // Add the restored accessory to the accessories cache so we can track if it has already been registered
-    this.accessories.push(accessory);
+
+    // add the restored accessory to the accessories cache, so we can track if it has already been registered
+    this.accessories.set(accessory.UUID, accessory);
   }
 
   /**
@@ -58,6 +68,7 @@ export class WLEDMQTTPlatform implements DynamicPlatformPlugin {
       return;
     }
 
+    // loop over the discovered devices and register each one if it has not already been registered
     for (const device of devices) {
       // Validate required fields
       if (!device.name || !device.mqttBroker || !device.mqttTopic) {
@@ -65,51 +76,57 @@ export class WLEDMQTTPlatform implements DynamicPlatformPlugin {
         continue;
       }
 
-      // Generate a unique id for the accessory
+      // generate a unique id for the accessory this should be generated from
+      // something globally unique, but constant, for example, the device serial
+      // number or MAC address
       const uuid = this.api.hap.uuid.generate(device.name + device.mqttTopic);
 
-      // Check if the accessory already exists
-      const existingAccessory = this.accessories.find(acc => acc.UUID === uuid);
+      // see if an accessory with the same uuid has already been registered and restored from
+      // the cached devices we stored in the `configureAccessory` method above
+      const existingAccessory = this.accessories.get(uuid);
 
       if (existingAccessory) {
-        // The accessory already exists
+        // the accessory already exists
         this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
-        // Update the accessory with the new device configuration
+
+        // if you need to update the accessory.context then you should run `api.updatePlatformAccessories`. e.g.:
+        existingAccessory.context.device = device;
+        this.api.updatePlatformAccessories([existingAccessory]);
+
+        // create the accessory handler for the restored accessory
+        // this is imported from `wledAccessory.ts`
         new WLEDAccessory(this, existingAccessory, device);
       } else {
-        // The accessory does not exist yet, so we need to create it
+        // the accessory does not yet exist, so we need to create it
         this.log.info('Adding new accessory:', device.name);
-        // Create a new accessory
+
+        // create a new accessory
         const accessory = new this.api.platformAccessory(device.name, uuid);
-        // Store a copy of the device object in the `accessory.context`
+
+        // store a copy of the device object in the `accessory.context`
+        // the `context` property can be used to store any data about the accessory you may need
         accessory.context.device = device;
-        // Create the accessory handler
+
+        // create the accessory handler for the newly create accessory
+        // this is imported from `wledAccessory.ts`
         new WLEDAccessory(this, accessory, device);
-        // Link the accessory to the platform
-        this.api.registerPlatformAccessories('homebridge-wled-mqtt', 'wled-mqtt', [accessory]);
-        // Push into accessory array
-        this.accessories.push(accessory);
+
+        // link the accessory to your platform
+        this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       }
+
+      // push into discoveredCacheUUIDs
+      this.discoveredCacheUUIDs.push(uuid);
     }
 
-    // Remove accessories that are no longer in the config
-    const configuredUuids = devices
-      .filter(d => d.name && d.mqttBroker && d.mqttTopic)
-      .map(d => this.api.hap.uuid.generate(d.name + d.mqttTopic));
-
-    const accessoriesToRemove = this.accessories.filter(
-      acc => !configuredUuids.includes(acc.UUID),
-    );
-
-    if (accessoriesToRemove.length > 0) {
-      this.log.info('Removing', accessoriesToRemove.length, 'orphaned accessories');
-      this.api.unregisterPlatformAccessories('homebridge-wled-mqtt', 'wled-mqtt', accessoriesToRemove);
-      accessoriesToRemove.forEach(acc => {
-        const index = this.accessories.indexOf(acc);
-        if (index > -1) {
-          this.accessories.splice(index, 1);
-        }
-      });
+    // you can also deal with accessories from the cache which are no longer present by removing them from Homebridge
+    // for example, if your plugin logs into a cloud account to retrieve a device list, and a user has previously removed a device
+    // from this cloud account, then this device will no longer be present in the device list but will still be in the Homebridge cache
+    for (const [uuid, accessory] of this.accessories) {
+      if (!this.discoveredCacheUUIDs.includes(uuid)) {
+        this.log.info('Removing existing accessory from cache:', accessory.displayName);
+        this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+      }
     }
   }
 }

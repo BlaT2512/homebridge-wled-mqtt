@@ -1,14 +1,25 @@
 {
   "name": "homebridge-wled-mqtt",
+  "displayName": "Homebridge WLED MQTT",
+  "type": "module",
   "version": "1.0.0",
   "description": "Control WLED devices through MQTT with Homebridge and Apple Home",
+  "author": "Blake Tourneur",
+  "license": "MIT",
+  "homepage": "https://github.com/BlaT2512/homebridge-wled-mqtt#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BlaT2512/homebridge-wled-mqtt.git"
+  },
+  "bugs": {
+    "url": "https://github.com/BlaT2512/homebridge-wled-mqtt/issues"
+  },
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
-    "watch": "tsc --watch",
-    "prepublishOnly": "npm run build",
-    "lint": "eslint src/**.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "rimraf ./dist && tsc",
+    "lint": "eslint . --max-warnings=0",
+    "prepublishOnly": "npm run lint && npm run build",
+    "watch": "npm run build && npm link && nodemon"
   },
   "keywords": [
     "homebridge-plugin",
@@ -22,8 +33,6 @@
     "node": "^20.18.0 || ^22.10.0 || ^24.0.0",
     "homebridge": "^1.8.0 || ^2.0.0-beta.0"
   },
-  "author": "",
-  "license": "MIT",
   "dependencies": {
     "mqtt": "^5.10.0",
     "homebridge-lib": "^7.1.12"
