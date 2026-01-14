@@ -36,6 +36,7 @@ export class WLEDAccessory {
   };
   private isUpdating = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private isAdaptiveLightingUpdate = false; // Track if color update is from adaptive lighting
 
   constructor(
     private readonly platform: WLEDMQTTPlatform,
@@ -221,9 +222,19 @@ export class WLEDAccessory {
         // Brightness value (0-255)
         const brightness = parseInt(messageStr, 10);
         if (!isNaN(brightness) && brightness >= 0 && brightness <= 255) {
+          // Ignore 0% brightness - it just means the light is off
+          // Brightness should never be 0%, only the on/off state changes
+          if (brightness === 0) {
+            // Light is off, update on state but don't change brightness
+            this.currentState.on = false;
+            this.service.updateCharacteristic(this.platform.Characteristic.On, false);
+            return;
+          }
+          
+          // Brightness is > 0, update both brightness and on state
           this.currentState.brightness = brightness;
-          this.currentState.on = brightness > 0;
-          this.service.updateCharacteristic(this.platform.Characteristic.On, this.currentState.on);
+          this.currentState.on = true;
+          this.service.updateCharacteristic(this.platform.Characteristic.On, true);
           this.service.updateCharacteristic(
             this.platform.Characteristic.Brightness,
             Math.round((brightness / 255) * 100),
@@ -238,12 +249,21 @@ export class WLEDAccessory {
           this.service.updateCharacteristic(this.platform.Characteristic.Hue, hsv.h);
           this.service.updateCharacteristic(this.platform.Characteristic.Saturation, hsv.s);
           
-          // If adaptive lighting is active and color changed from outside HomeKit (MQTT),
-          // we must disable adaptive lighting as per documentation
-          if (this.adaptiveLightingController?.isAdaptiveLightingActive()) {
+          // Only disable adaptive lighting if:
+          // 1. Adaptive lighting is active
+          // 2. The color change is NOT from adaptive lighting itself (flag check)
+          // 3. The color change is from outside HomeKit (manual change)
+          // We use a timeout to clear the flag, as MQTT messages may arrive asynchronously
+          if (this.adaptiveLightingController?.isAdaptiveLightingActive() && !this.isAdaptiveLightingUpdate) {
             this.adaptiveLightingController.disableAdaptiveLighting();
             this.platform.log.debug(`Adaptive Lighting disabled for ${this.device.name} due to color change from MQTT`);
           }
+          
+          // Reset the flag after a short delay to handle async MQTT messages
+          // This allows adaptive lighting updates to complete before the flag is cleared
+          setTimeout(() => {
+            this.isAdaptiveLightingUpdate = false;
+          }, 100);
           
           // Don't update ColorTemperature when receiving color from MQTT
           // Color temperature only applies to white/neutral colors, not arbitrary RGB colors
@@ -299,13 +319,14 @@ export class WLEDAccessory {
     const baseTopic = this.device.mqttTopic;
 
     if (boolValue) {
-      // Turn on: set brightness to current brightness (or 255 if 0)
+      // Turn on: use current brightness (which should never be 0)
+      // If somehow brightness is 0, default to 255
       const brightness = this.currentState.brightness > 0 ? this.currentState.brightness : 255;
       this.currentState.brightness = brightness;
       this.publishMQTT(baseTopic, brightness.toString());
     } else {
-      // Turn off: set brightness to 0
-      this.currentState.brightness = 0;
+      // Turn off: publish 0 to MQTT but don't change brightness state
+      // Brightness should always remain > 0, only on/off state changes
       this.publishMQTT(baseTopic, '0');
     }
 
@@ -326,10 +347,20 @@ export class WLEDAccessory {
     const numValue = value as number;
     if (this.isUpdating) return;
 
-    // Convert 0-100 to 0-255
-    const brightness = Math.round((numValue / 100) * 255);
+    // If brightness is 0%, turn off instead
+    if (numValue === 0) {
+      this.currentState.on = false;
+      const baseTopic = this.device.mqttTopic;
+      this.publishMQTT(baseTopic, '0');
+      this.service.updateCharacteristic(this.platform.Characteristic.On, false);
+      this.platform.log.debug(`Set ${this.device.name} Brightness to 0% - turning off`);
+      return;
+    }
+
+    // Convert 0-100 to 1-255 (brightness should never be 0)
+    const brightness = Math.max(1, Math.round((numValue / 100) * 255));
     this.currentState.brightness = brightness;
-    this.currentState.on = brightness > 0;
+    this.currentState.on = true;
 
     const baseTopic = this.device.mqttTopic;
     // Publish brightness to base topic (WLED master brightness)
@@ -405,6 +436,13 @@ export class WLEDAccessory {
   async setColorTemperature(value: CharacteristicValue) {
     const numValue = value as number;
     if (this.isUpdating) return;
+
+    // Mark this as an adaptive lighting update if adaptive lighting is active
+    // This prevents us from disabling adaptive lighting when we receive our own MQTT message
+    const isAdaptiveLighting = this.adaptiveLightingController?.isAdaptiveLightingActive() ?? false;
+    if (isAdaptiveLighting) {
+      this.isAdaptiveLightingUpdate = true;
+    }
 
     // Convert color temperature to RGB
     const rgb = colorTemperatureToRgb(numValue);
