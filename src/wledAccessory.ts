@@ -37,6 +37,7 @@ export class WLEDAccessory {
   private isUpdating = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isAdaptiveLightingUpdate = false; // Track if color update is from adaptive lighting
+  private ignoreColorUpdateUntil: number = 0; // Timestamp until which to ignore color updates (for turn-on sync)
 
   constructor(
     private readonly platform: WLEDMQTTPlatform,
@@ -249,14 +250,23 @@ export class WLEDAccessory {
           this.service.updateCharacteristic(this.platform.Characteristic.Hue, hsv.h);
           this.service.updateCharacteristic(this.platform.Characteristic.Saturation, hsv.s);
           
+          // Check if we should ignore this color update (e.g., after turning on with adaptive lighting)
+          const shouldIgnore = Date.now() < this.ignoreColorUpdateUntil;
+          
           // Only disable adaptive lighting if:
           // 1. Adaptive lighting is active
           // 2. The color change is NOT from adaptive lighting itself (flag check)
           // 3. The color change is from outside HomeKit (manual change)
-          // We use a timeout to clear the flag, as MQTT messages may arrive asynchronously
-          if (this.adaptiveLightingController?.isAdaptiveLightingActive() && !this.isAdaptiveLightingUpdate) {
+          // 4. We're not in the ignore period (after turning on)
+          if (this.adaptiveLightingController?.isAdaptiveLightingActive() && 
+              !this.isAdaptiveLightingUpdate && 
+              !shouldIgnore) {
             this.adaptiveLightingController.disableAdaptiveLighting();
             this.platform.log.debug(`Adaptive Lighting disabled for ${this.device.name} due to color change from MQTT`);
+          }
+          
+          if (shouldIgnore) {
+            this.platform.log.debug(`Ignoring color update for ${this.device.name} (within turn-on sync period)`);
           }
           
           // Reset the flag after a short delay to handle async MQTT messages
@@ -324,6 +334,13 @@ export class WLEDAccessory {
       const brightness = this.currentState.brightness > 0 ? this.currentState.brightness : 255;
       this.currentState.brightness = brightness;
       this.publishMQTT(baseTopic, brightness.toString());
+      
+      // If adaptive lighting is active, ignore color updates for a short period
+      // This prevents disabling adaptive lighting when WLED sends back the last color
+      if (this.adaptiveLightingController?.isAdaptiveLightingActive()) {
+        this.ignoreColorUpdateUntil = Date.now() + 1000; // Ignore for 1 second after turn on
+        this.platform.log.debug(`Ignoring color updates for ${this.device.name} for 1s after turn on (adaptive lighting active)`);
+      }
     } else {
       // Turn off: publish 0 to MQTT but don't change brightness state
       // Brightness should always remain > 0, only on/off state changes
