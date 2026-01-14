@@ -38,6 +38,8 @@ export class WLEDAccessory {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isAdaptiveLightingUpdate = false; // Track if color update is from adaptive lighting
   private ignoreColorUpdateUntil: number = 0; // Timestamp until which to ignore color updates (for turn-on sync)
+  private colorChangedWhileOff = false; // Track if color changed while light was off (manual change)
+  private lastColorBeforeOff: { r: number; g: number; b: number } | null = null; // Store color before turning off
 
   constructor(
     private readonly platform: WLEDMQTTPlatform,
@@ -245,6 +247,19 @@ export class WLEDAccessory {
         // Color value (hex format like #FF0000)
         const rgb = hexToRgb(messageStr);
         if (rgb) {
+          // Check if color changed while light was off
+          if (!this.currentState.on && this.lastColorBeforeOff) {
+            // Compare colors (with small tolerance for rounding differences)
+            const colorChanged = Math.abs(rgb.r - this.lastColorBeforeOff.r) > 2 ||
+                                Math.abs(rgb.g - this.lastColorBeforeOff.g) > 2 ||
+                                Math.abs(rgb.b - this.lastColorBeforeOff.b) > 2;
+            
+            if (colorChanged && this.adaptiveLightingController?.isAdaptiveLightingActive()) {
+              this.colorChangedWhileOff = true;
+              this.platform.log.debug(`Color changed while ${this.device.name} was off - will disable adaptive lighting on turn on`);
+            }
+          }
+          
           this.currentState.color = rgb;
           const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
           this.service.updateCharacteristic(this.platform.Characteristic.Hue, hsv.h);
@@ -258,15 +273,19 @@ export class WLEDAccessory {
           // 2. The color change is NOT from adaptive lighting itself (flag check)
           // 3. The color change is from outside HomeKit (manual change)
           // 4. We're not in the ignore period (after turning on)
+          // 5. The light is currently ON (don't disable adaptive lighting for color changes while off)
           if (this.adaptiveLightingController?.isAdaptiveLightingActive() && 
               !this.isAdaptiveLightingUpdate && 
-              !shouldIgnore) {
+              !shouldIgnore &&
+              this.currentState.on) {
             this.adaptiveLightingController.disableAdaptiveLighting();
             this.platform.log.debug(`Adaptive Lighting disabled for ${this.device.name} due to color change from MQTT`);
           }
           
           if (shouldIgnore) {
             this.platform.log.debug(`Ignoring color update for ${this.device.name} (within turn-on sync period)`);
+          } else if (!this.currentState.on) {
+            this.platform.log.debug(`Ignoring adaptive lighting disable for ${this.device.name} (light is off)`);
           }
           
           // Reset the flag after a short delay to handle async MQTT messages
@@ -335,6 +354,13 @@ export class WLEDAccessory {
       this.currentState.brightness = brightness;
       this.publishMQTT(baseTopic, brightness.toString());
       
+      // Check if color changed while light was off
+      if (this.colorChangedWhileOff && this.adaptiveLightingController?.isAdaptiveLightingActive()) {
+        this.adaptiveLightingController.disableAdaptiveLighting();
+        this.platform.log.debug(`Adaptive Lighting disabled for ${this.device.name} - color was changed while light was off`);
+        this.colorChangedWhileOff = false; // Reset flag
+      }
+      
       // If adaptive lighting is active, ignore color updates for a short period
       // This prevents disabling adaptive lighting when WLED sends back the last color
       if (this.adaptiveLightingController?.isAdaptiveLightingActive()) {
@@ -344,6 +370,9 @@ export class WLEDAccessory {
     } else {
       // Turn off: publish 0 to MQTT but don't change brightness state
       // Brightness should always remain > 0, only on/off state changes
+      // Store current color before turning off to detect changes while off
+      this.lastColorBeforeOff = { ...this.currentState.color };
+      this.colorChangedWhileOff = false; // Reset flag when turning off
       this.publishMQTT(baseTopic, '0');
     }
 
