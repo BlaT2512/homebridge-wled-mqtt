@@ -280,6 +280,13 @@ export class WLEDAccessory {
               this.currentState.on) {
             this.adaptiveLightingController.disableAdaptiveLighting();
             this.platform.log.debug(`Adaptive Lighting disabled for ${this.device.name} due to color change from MQTT`);
+            
+            // Update ColorTemperature to match the new color so HomeKit displays correctly
+            // Use updateValue to avoid triggering events (as per AdaptiveLightingController docs)
+            const mireds = rgbToColorTemperature(rgb.r, rgb.g, rgb.b);
+            this.currentState.colorTemperature = mireds;
+            this.service.getCharacteristic(this.platform.Characteristic.ColorTemperature)
+              .updateValue(mireds);
           }
           
           if (shouldIgnore) {
@@ -358,6 +365,14 @@ export class WLEDAccessory {
       if (this.colorChangedWhileOff && this.adaptiveLightingController?.isAdaptiveLightingActive()) {
         this.adaptiveLightingController.disableAdaptiveLighting();
         this.platform.log.debug(`Adaptive Lighting disabled for ${this.device.name} - color was changed while light was off`);
+        
+        // Update ColorTemperature to match the current color so HomeKit displays correctly
+        // Use updateValue to avoid triggering events (as per AdaptiveLightingController docs)
+        const mireds = rgbToColorTemperature(this.currentState.color.r, this.currentState.color.g, this.currentState.color.b);
+        this.currentState.colorTemperature = mireds;
+        this.service.getCharacteristic(this.platform.Characteristic.ColorTemperature)
+          .updateValue(mireds);
+        
         this.colorChangedWhileOff = false; // Reset flag
       }
       
