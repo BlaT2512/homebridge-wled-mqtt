@@ -1,0 +1,62 @@
+{
+  "pluginAlias": "wled-mqtt",
+  "pluginType": "platform",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Plugin Name",
+        "type": "string",
+        "required": true,
+        "default": "WLED MQTT"
+      },
+      "devices": {
+        "title": "WLED Devices",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "title": "Device Name",
+              "type": "string",
+              "required": true,
+              "description": "Name of the WLED device as it will appear in HomeKit"
+            },
+            "mqttBroker": {
+              "title": "MQTT Broker",
+              "type": "string",
+              "required": true,
+              "description": "MQTT broker address (e.g., mqtt://192.168.1.100:1883 or mqtt://broker.local:1883)"
+            },
+            "mqttUsername": {
+              "title": "MQTT Username",
+              "type": "string",
+              "required": false,
+              "description": "MQTT broker username (optional)"
+            },
+            "mqttPassword": {
+              "title": "MQTT Password",
+              "type": "string",
+              "required": false,
+              "description": "MQTT broker password (optional)"
+            },
+            "mqttTopic": {
+              "title": "MQTT Base Topic",
+              "type": "string",
+              "required": true,
+              "description": "Base MQTT topic for the WLED device (e.g., wled/desk)"
+            },
+            "enableHistory": {
+              "title": "Enable History",
+              "type": "boolean",
+              "required": false,
+              "default": true,
+              "description": "Enable history tracking for on/off and brightness changes (for Apple Home/Eve)"
+            }
+          },
+          "required": ["name", "mqttBroker", "mqttTopic"]
+        }
+      }
+    }
+  }
+}
