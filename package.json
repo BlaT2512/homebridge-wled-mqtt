@@ -1,7 +1,6 @@
 {
   "name": "homebridge-wled-mqtt",
   "displayName": "Homebridge WLED MQTT",
-  "type": "module",
   "version": "1.0.0",
   "description": "Control WLED devices through MQTT with Homebridge and Apple Home",
   "author": "Blake Tourneur",

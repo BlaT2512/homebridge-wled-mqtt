@@ -95,7 +95,7 @@ export class WLEDMQTTPlatform implements DynamicPlatformPlugin {
 
         // create the accessory handler for the restored accessory
         // this is imported from `wledAccessory.ts`
-        new WLEDAccessory(this, existingAccessory, device);
+        new WLEDAccessory(this, existingAccessory, device, this.api);
       } else {
         // the accessory does not yet exist, so we need to create it
         this.log.info('Adding new accessory:', device.name);
@@ -109,7 +109,7 @@ export class WLEDMQTTPlatform implements DynamicPlatformPlugin {
 
         // create the accessory handler for the newly create accessory
         // this is imported from `wledAccessory.ts`
-        new WLEDAccessory(this, accessory, device);
+        new WLEDAccessory(this, accessory, device, this.api);
 
         // link the accessory to your platform
         this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);

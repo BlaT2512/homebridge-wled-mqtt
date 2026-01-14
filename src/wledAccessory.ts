@@ -1,6 +1,5 @@
 import mqtt, { MqttClient } from 'mqtt';
 import { API, CharacteristicValue, Logging, PlatformAccessory, Service } from 'homebridge';
-import { AdaptiveLightingController } from '@homebridge/hap-nodejs';
 
 import { WLEDMQTTPlatform } from './platform';
 import { hsvToRgb, rgbToHsv, rgbToHex, hexToRgb, rgbToColorTemperature, colorTemperatureToRgb } from './utils';
@@ -29,7 +28,7 @@ export class WLEDAccessory {
   private service: Service;
   private informationService: Service;
   private mqttClient: MqttClient | null = null;
-  private adaptiveLightingController: AdaptiveLightingController | null = null;
+  private adaptiveLightingController: any = null; // AdaptiveLightingController from api.hap
   private currentState: WLEDState = {
     on: false,
     brightness: 255,
@@ -42,6 +41,7 @@ export class WLEDAccessory {
     private readonly platform: WLEDMQTTPlatform,
     private readonly accessory: PlatformAccessory,
     private readonly device: WLEDDevice,
+    private readonly api: API,
   ) {
     // Set accessory information
     this.informationService = this.accessory.getService(this.platform.Service.AccessoryInformation)!
@@ -101,10 +101,16 @@ export class WLEDAccessory {
    */
   private setupAdaptiveLighting() {
     try {
-      this.adaptiveLightingController = new AdaptiveLightingController(this.service);
+      // AdaptiveLightingController is available through api.hap
+      const AdaptiveLightingController = this.api.hap.AdaptiveLightingController;
+      if (AdaptiveLightingController) {
+        this.adaptiveLightingController = new AdaptiveLightingController(this.service);
 
-      this.accessory.configureController(this.adaptiveLightingController);
-      this.platform.log.debug('Adaptive Lighting controller configured for', this.device.name);
+        this.accessory.configureController(this.adaptiveLightingController);
+        this.platform.log.debug('Adaptive Lighting controller configured for', this.device.name);
+      } else {
+        this.platform.log.warn('AdaptiveLightingController not available in this Homebridge version');
+      }
     } catch (error) {
       this.platform.log.warn('Failed to set up Adaptive Lighting:', error);
     }
